@@ -8,6 +8,7 @@ wandb/
 
 # checkpoints
 checkpoints/
+results/
 
 # MAC os
 .DS_Store

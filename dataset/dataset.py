@@ -53,8 +53,8 @@ class featureDataset(Dataset):
             'noOverlap' if not args.patch_overlap else f"{args.patch_overlap}overlap",
             'calibrate' if args.calibrate else '',
             'Filtered' if args.filter else '',
-            'Normed' if args.norm else '',
-            'Aug' if args.aug else ''
+            'Normed' if args.stain_norm else '',
+            'Aug' if args.augmentation else ''
         ]
         
         tags = '_'.join([t for t in tags if t])
@@ -66,12 +66,10 @@ class featureDataset(Dataset):
         path = os.path.join(wsi_root, folder)
 
         return path
-
-    
     
     def __len__(self):
         return self.num_wsi
     
     def __getitem__(self, index):
         slide = self.wsi_list[index]
-        return slide.feature, slide.labe
+        return slide.feature, slide.label

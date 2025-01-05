@@ -51,6 +51,7 @@ class TransMIL(nn.Module):
         self.proj = PPEG(dim=d_model)
         self._fc1 = nn.Sequential(nn.Linear(d_in, d_model), nn.ReLU())
         self.cls_token = nn.Parameter(torch.randn(1, 1, d_model))
+        self.pos_layer = PPEG(dim=d_model)
         self.layer1 = TransLayer(dim=d_model)
         self.layer2 = TransLayer(dim=d_model)
         self.norm = nn.LayerNorm(d_model)

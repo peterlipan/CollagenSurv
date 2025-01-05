@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 
 
-class ModleOutputs:
+class ModelOutputs:
     def __init__(self, features=None, logits=None, y_prob=None, y_hat=None):
         self.dict = {'features': features, 'logits': logits, 'y_prob': y_prob, 'y_hat': y_hat}
     
@@ -18,6 +18,9 @@ class ModleOutputs:
     def __repr__(self):
         return str(self.dict)
 
+    def __getattr__(self, key):
+        return self.dict[key]
+
 
 def CreateModel(args):
     if args.backbone.lower() == 'transmil':
@@ -25,12 +28,13 @@ def CreateModel(args):
         model = TransMIL(args.d_in, args.d_model, args.n_classes)
     elif args.backbone.lower() == 'abmil':
         from .ABMIL import DAttention
-        model = DAttention(args.d_in, args.n_classes, dropout=args.dropout, act=args.act)
+        model = DAttention(args.d_in, args.n_classes, dropout=args.dropout, act=args.activation)
     elif args.backbone.lower() == 'meanpool':
         from .Pooler import Pooler
-        model = Pooler(args.d_in, args.d_model, args.n_classes, p_method='mean', activation=args.act)
+        model = Pooler(args.d_in, args.d_model, args.n_classes, p_method='mean', activation=args.activation)
     elif args.backbone.lower() == 'maxpool':
         from .Pooler import Pooler
-        model = Pooler(args.d_in, args.d_model, args.n_classes, p_method='max', activation=args.act)
+        model = Pooler(args.d_in, args.d_model, args.n_classes, p_method='max', activation=args.activation)
     else:
         raise NotImplementedError
+    return model
