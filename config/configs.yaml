@@ -1,0 +1,34 @@
+# Path
+wsi_csv_path: '/home/r20user18/Documents/datasets/labels/QMH_Chondroid_case_wsi_label_new.csv'
+wsi_root: '/home/r20user18/Documents/datasets/WSI/Tiles'
+patient_csv_path: '/home/r20user18/Documents/datasets/labels/Chondroid_deeplearning_clinical_QMH_new.csv'
+checkpoints: './checkpoints'
+
+# dataset
+extractor: 'uni'
+magnification: '20x'
+patch_size: 512
+patch_overlap: 0
+calibrate: True
+filter: True
+stain_norm: True
+augmentation: True
+task: '2_cls' # ['2_cls', '4_cls', 'survival']
+
+# model
+backbone: 'transmil'
+
+
+# training
+workers: 16
+visible_gpus: '7'
+seed: 42 # 42 or 19
+k: 5 #3
+epochs: 25 # 25 or 30 50 #30+1/32+1/33+1 # C4-> 25 / 30,  C2-> 10
+batch_size: 1 # as number of patches is different for each wsi
+lr: 5.0e-5 #[1.0e-5 for None; 1.0e-4 for cosine, 5.0e-6 OR 5.0e-5 is good]
+lr_policy: 'None' #['cosine','cosine_restarts', 'None', 'multi_step']
+weight_decay: 0.0005 #[5.0e-4,]
+
+# output
+save4CM: 'all_fold' # 'each_fold' or 'all_fold'
