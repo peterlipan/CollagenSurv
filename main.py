@@ -21,14 +21,10 @@ def main(args, logger):
         wsi_csv = wsi_csv[wsi_csv['Grade.Revised'].isin(['0', '1'])]
         patient_csv = patient_csv[patient_csv['Grade.Revised'].isin(['0', '1'])]
 
-    elif args.task == '4_cls':
+    elif args.task == '4_cls' or args.task == 'survival':
         # 4 class classification
         wsi_csv = pd.read_csv(args.wsi_csv_path)
         patient_csv = pd.read_csv(args.patient_csv_path)  
-
-    elif args.task == 'survival':
-        #TODO: read data for survival task
-        pass
 
     else:
         raise ValueError("task should be one of ['2_cls', '4_cls', 'survival']")

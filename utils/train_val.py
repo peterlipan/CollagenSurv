@@ -4,23 +4,27 @@ import warnings
 import pandas as pd
 from models import CreateModel
 from dataset import featureDataset
-from .metrics import compute_avg_metrics
+from .metrics import compute_cls_metrics, compute_surv_metrics
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedKFold
+from .losses import CrossEntropySurvLoss, NLLSurvLoss, CoxSurvLoss, CrossEntropyClsLoss
 
 
 class MetricLogger:
     def __init__(self, n_folds):
         self.fold = 0
         self.n_folds = n_folds
-        self.metrics = ['Accuracy', 'F1', 'AUC', 'AP', 'BAC', 'Sensitivity', 'Specificity', 'Precision', 'MCC', 'Kappa']
-        self.fold_metrics = [self._init_dict() for _ in range(n_folds)] # save final metrics for each fold
+        self.fold_metrics = [{} for _ in range(n_folds)] # save final metrics for each fold
+    
+    @property
+    def metrics(self):
+        return list(self.fold_metrics[self.fold].keys())
     
     def _set_fold(self, fold):
         self.fold = fold
     
-    def _init_dict(self):
-        return {metric: 0.0 for metric in self.metrics}
+    def _empty_dict(self):
+        return {key: 0.0 for key in self.metrics}
 
     def update(self, metric_dict):
         for key in metric_dict:
@@ -29,7 +33,7 @@ class MetricLogger:
     def _fold_average(self):
         if self.fold < self.n_folds - 1:
             raise Warning("Not all folds have been completed.")
-        avg_metrics = self._init_dict()
+        avg_metrics = self._empty_dict()
         for metric in avg_metrics:
             for fold in self.fold_metrics:
                 avg_metrics[metric] += fold[metric]
@@ -46,11 +50,13 @@ class Trainer:
         self.wb_logger = wb_logger
         self.val_steps = val_steps
         self.verbose = verbose
+        self.task = args.task
         self.m_logger = MetricLogger(n_folds=self.kfold)
+        self.surv2lossfunc = {'nll': NLLSurvLoss, 'cox': CoxSurvLoss, 'ce': CrossEntropySurvLoss}
     
     def _dataset_split(self, train_patient_idx, test_patient_idx):
-        self.train_dataset = featureDataset(args=self.args, wsi_df=self.wsi_df, patient_idx=train_patient_idx)
-        self.test_dataset = featureDataset(args=self.args, wsi_df=self.wsi_df, patient_idx=test_patient_idx)
+        self.train_dataset = featureDataset(args=self.args, wsi_df=self.wsi_df, patient_idx=train_patient_idx, new_label=self.args.calibrate)
+        self.test_dataset = featureDataset(args=self.args, wsi_df=self.wsi_df, patient_idx=test_patient_idx, new_label=self.args.calibrate)
         self.train_loader = DataLoader(self.train_dataset, batch_size=self.args.batch_size, 
                                        shuffle=True, num_workers=self.args.workers)
         self.test_loader = DataLoader(self.test_dataset, batch_size=self.args.batch_size, 
@@ -59,7 +65,10 @@ class Trainer:
         self.args.n_classes = self.train_dataset.num_labels
         self.model = CreateModel(self.args).cuda()
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay)
-        self.criterion = torch.nn.CrossEntropyLoss().cuda()
+        if 'cls' in self.args.task:
+            self.criterion = CrossEntropyClsLoss().cuda()
+        else:
+            self.criterion = self.surv2lossfunc[self.args.surv_loss.lower()]().cuda()
         
         self.scheduler = None
         if self.args.lr_policy == 'cosine':
@@ -100,45 +109,63 @@ class Trainer:
     def train(self):
         self.model.train()
         cur_iters = 0
-        for i, (features, labels) in enumerate(self.train_loader):
-            features, labels = features.cuda(non_blocking=True), labels.cuda(non_blocking=True)
-    
-            outputs = self.model(features)
-            loss = self.criterion(outputs.logits, labels)
+        for i in range(self.args.epochs):
+            for data in self.train_loader:
+                data = {k: v.cuda(non_blocking=True) for k, v in data.items()}
+        
+                outputs = self.model(data)
+                loss = self.criterion(outputs, data)
 
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
-            if self.scheduler is not None:
-                self.scheduler.step()
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+                if self.scheduler is not None:
+                    self.scheduler.step()
 
-            cur_iters += 1
-            if cur_iters % self.val_steps == 0:
-                cur_lr = self.optimizer.param_groups[0]['lr']
-                metric_dict = self.validate()
+                cur_iters += 1
                 if self.verbose:
-                    print(f"Fold {self.fold} | Epoch {i} | Loss: {loss.item()} | Acc: {metric_dict['Accuracy']} | LR: {cur_lr}")
-                if self.wb_logger is not None:
-                    self.wb_logger.log({f"Fold_{self.fold}": {
-                        'Train': {'loss': loss.item(), 'lr': cur_lr},
-                        'Test': metric_dict
-                    }})
+                    if cur_iters % self.val_steps == 0:
+                        cur_lr = self.optimizer.param_groups[0]['lr']
+                        metric_dict = self.validate()
+                        print(f"Fold {self.fold} | Epoch {i} | Loss: {loss.item()} | Acc: {metric_dict['Accuracy']} | LR: {cur_lr}")
+                        if self.wb_logger is not None:
+                            self.wb_logger.log({f"Fold_{self.fold}": {
+                                'Train': {'loss': loss.item(), 'lr': cur_lr},
+                                'Test': metric_dict
+                            }})
 
     def validate(self):
         training = self.model.training
         self.model.eval()
-        ground_truth = torch.Tensor().cuda()
-        probabilities = torch.Tensor().cuda()
-        with torch.no_grad():
-            for features, labels in self.test_loader:
-                features, labels = features.cuda(non_blocking=True), labels.cuda(non_blocking=True)
-                outputs = self.model(features)
-                prob = outputs.y_prob
 
-                ground_truth = torch.cat((ground_truth, labels), dim=0)
-                probabilities = torch.cat((probabilities, prob), dim=0)
+        if 'cls' in self.task:
+            ground_truth = torch.Tensor().cuda()
+            probabilities = torch.Tensor().cuda()
+        if 'surv' in self.task:
+            event_indicator = torch.Tensor().cuda() # whether the event (death) has occurred
+            event_time = torch.Tensor().cuda()
+            estimate = torch.Tensor().cuda()
+
+        with torch.no_grad():
+            for data in self.test_loader:
+                data = {k: v.cuda(non_blocking=True) for k, v in data.items()}
+                outputs = self.model(data)
+
+                if 'cls' in self.task:
+                    prob = outputs.y_prob
+                    ground_truth = torch.cat((ground_truth, data['label']), dim=0)
+                    probabilities = torch.cat((probabilities, prob), dim=0)
+                
+                if 'surv' in self.task:
+                    risk = -torch.sum(outputs['surv'], dim=1)
+                    event_indicator = torch.cat((event_indicator, data['dead']), dim=0)
+                    event_time = torch.cat((event_time, data['event_time']), dim=0)
+                    estimate = torch.cat((estimate, risk), dim=0)
+                    # compute survival metrics
             
-            metric_dict = compute_avg_metrics(ground_truth, probabilities, avg=self.args.metric_avg)
+            cls_dict = compute_cls_metrics(ground_truth, probabilities) if 'cls' in self.task else {}
+            surv_dict = compute_surv_metrics(event_indicator, event_time, estimate) if 'surv' in self.task else {}
+            metric_dict = {**cls_dict, **surv_dict}
         
         self.model.train(training)
 
@@ -154,10 +181,15 @@ class Trainer:
         if not os.path.exists(res_path):
             os.makedirs(res_path)
 
-        settings = ['Model', 'KFold', 'Feature Extractor', 'Magnification', 'Patch Size', 
-                    'Patch Overlap', 'New Annotation', 'Stain Normalization', 'Augmentation', 'Metric Average Method']
-        kwargs = ['backbone', 'kfold', 'extractor', 'magnification', 'patch_size', 'patch_overlap', 'calibrate', 'stain_norm', 'augmentation', 'metric_avg']
-        set2kwargs = {k: v for k, v in zip(settings, kwargs)}
+        dataset_settings = ['Model', 'KFold', 'Feature Extractor', 'Magnification', 'Patch Size', 
+                    'Patch Overlap', 'New Annotation', 'Stain Normalization', 'Augmentation', 'Epochs']
+        dataset_kwargs = ['backbone', 'kfold', 'extractor', 'magnification', 'patch_size', 
+                          'patch_overlap', 'calibrate', 'stain_norm', 'augmentation', 'epochs']
+        task_settings = ['Metric Average Method'] if 'cls'in self.task else ['Survival Loss']
+        task_kwargs = ['metric_avg'] if 'cls' in self.task else ['surv_loss']
+        
+        settings = dataset_settings + task_settings
+        set2kwargs = {k: v for k, v in zip(settings, dataset_kwargs + task_kwargs)}
 
         metric_names = self.m_logger.metrics
         df_columns = settings + metric_names
@@ -180,10 +212,11 @@ class Trainer:
         new_row['Augmentation'] = 'Yes' if new_row['Augmentation'] else 'No'
 
         if keep_best: # keep the rows with the best mcc for each fold
+            reference = 'MCC' if 'cls' in self.task else 'C-index'
             exsiting_rows = df[(df[settings] == pd.Series(new_row)).all(axis=1)]
             if not exsiting_rows.empty:
-                exsiting_mcc = exsiting_rows['MCC'].values
-                if metric_dict['MCC'] > exsiting_mcc:
+                exsiting_mcc = exsiting_rows[reference].values
+                if metric_dict[reference] > exsiting_mcc:
                     df = df.drop(exsiting_rows.index)
                 else:
                     return

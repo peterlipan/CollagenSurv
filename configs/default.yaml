@@ -6,7 +6,7 @@ checkpoints: './checkpoints'
 results: './results'
 
 # dataset
-extractor: 'UNI'
+extractor: 'conch'
 magnification: 20
 patch_size: 512
 patch_overlap: 0
@@ -14,12 +14,14 @@ calibrate: True
 filter: True
 stain_norm: True
 augmentation: True
-task: '2_cls' # ['2_cls', '4_cls', 'survival']
+task: 'survival' # ['2_cls', '4_cls', 'survival']
+surv_classes: 4
 
 # model
-backbone: 'MaxPool'
+backbone: 'TransMIL'
 d_model: 512
 activation: 'relu'
+surv_loss: 'CE' # ['CE', 'COX', 'NLL']
 
 
 # training
@@ -35,6 +37,3 @@ lr_policy: 'None' #['cosine','cosine_restarts', 'None', 'multi_step']
 weight_decay: 0.0005 #[5.0e-4,]
 
 metric_avg: 'macro' # 'micro' or 'macro'
-
-# output
-save4CM: 'all_fold' # 'each_fold' or 'all_fold'

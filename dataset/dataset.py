@@ -14,18 +14,63 @@ class Slide(object):
     def __init__(self, root_path, wsi_id, label, dim=512):
         self.label = label
         feature_path = os.path.join(root_path, wsi_id, 'features.pt')
+        adj_path = os.path.join(root_path, wsi_id, 'adj_s.pt')
         if os.path.exists(feature_path):
             self.feature = torch.load(feature_path, map_location=lambda storage, loc: storage)
         else:
             print(feature_path + ' not exists')
             self.feature = torch.zeros(1, dim)
+        
+        if os.path.exists(adj_path):
+            self.adj = torch.load(adj_path, map_location=lambda storage, loc: storage)
+        else:
+            print(adj_path + ' not exists')
+            self.adj = torch.zeros(1, 1)
+
+
+class Slide:
+    def __init__(self, root: str, row: pd.Series, d_x=512):
+        # root: root path to the WSI samples
+        # row: a row in the WSI information dataframe
+        x_path = os.path.join(root, row['Slides.ID'], 'features.pt')
+        adj_path = os.path.join(root, row['Slides.ID'], 'adj_s.pt')
+        self.label = row['Grade.Revised']
+        self.surv_label = row['survival_interval']
+        self.event_time = row['Overall.Survival.Months'] * 30
+        self.c = 0 if row['Death (Yes or No)']=='Yes' else 1
+        self.dead = 1 if row['Death (Yes or No)']=='Yes' else 0
+        self.survival = row['Overall.Survival.Months']
+        
+        if os.path.exists(x_path):
+            self.x = torch.load(x_path, map_location=lambda storage, loc: storage)
+        else:
+            print(x_path + ' not exists')
+            self.x = torch.zeros(1, d_x)
+        if os.path.exists(adj_path):
+            self.adj = torch.load(adj_path, map_location=lambda storage, loc: storage)
+        else:
+            print(adj_path + ' not exists')
+            self.adj = torch.zeros(1, 1)
+    
+    def _to_dict(self):
+        return {
+            'x': self.x,
+            'adj': self.adj,
+            'label': self.label,
+            'surv_label': self.surv_label,
+            'event_time': self.event_time,
+            'c': self.c,
+            'dead': self.dead,
+            'survival': self.survival
+        }
+        
+        
     
 
 class featureDataset(Dataset):
     def __init__(self, args, wsi_df, patient_idx, new_label=True):
 
         self.root = self._retrieve_data_path(args)
-
         # special cases
         if args.calibrate:
             wsi_df = wsi_df[wsi_df['Grading annotation'] == 'Yes']
@@ -34,18 +79,19 @@ class featureDataset(Dataset):
             wsi_df = wsi_df[wsi_df['Slides.ID'] != 'CHS032-WSI02']
 
         self.wsi_info = wsi_df[wsi_df['Case.ID'].isin(patient_idx)]
-        # wsi label
-        old_labels = self.wsi_info['Grade.Revised'].values
-        class2new = {'0': 0, '1': 1, '2': 2, '3': 2, 'D': 3}
-        self.patient_id = self.wsi_info['Case.ID'].values
-        self.wsi_labels = [class2new[k] for k in old_labels] if new_label else old_labels
-        self.num_labels = len(set(self.wsi_labels))
-        # wsi index
-        self.wsi_ids = self.wsi_info['Slides.ID'].values
-        self.num_wsi= len(self.wsi_ids)
 
-        # all wsi(patches) + label
-        self.wsi_list = [Slide(self.root, self.wsi_ids[i], self.wsi_labels[i]) for i in range(self.num_wsi)]
+        # Update the grading
+        labels = self.wsi_info['Grade.Revised'].values
+        if new_label:
+            class2new = {'0': 0, '1': 1, '2': 2, '3': 2, 'D': 3}
+            labels = [class2new[str(l)] for l in labels]
+            self.wsi_info['Grade.Revised'] = labels
+        # classification task or survival task
+        self.num_labels = len(set(labels)) if not args.task == 'survival' else args.surv_classes
+
+        self.num_wsi= self.wsi_info.shape[0]
+
+        self.wsi_list = [Slide(self.root, self.wsi_info.iloc[i]) for i in range(self.num_wsi)]
             
     def _retrieve_data_path(self, args):
         wsi_root = args.wsi_root
@@ -72,4 +118,5 @@ class featureDataset(Dataset):
     
     def __getitem__(self, index):
         slide = self.wsi_list[index]
-        return slide.feature, slide.label
+        return slide._to_dict()
+    

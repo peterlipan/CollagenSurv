@@ -46,7 +46,7 @@ class PPEG(nn.Module):
 
 # TransMIL
 class TransMIL(nn.Module):
-    def __init__(self, d_in, d_model, n_classes):
+    def __init__(self, d_in, d_model, n_classes, surv_classes=4, task='cls'):
         super(TransMIL, self).__init__()
         self.proj = PPEG(dim=d_model)
         self._fc1 = nn.Sequential(nn.Linear(d_in, d_model), nn.ReLU())
@@ -56,9 +56,15 @@ class TransMIL(nn.Module):
         self.layer2 = TransLayer(dim=d_model)
         self.norm = nn.LayerNorm(d_model)
         self.classifier = nn.Linear(d_model, n_classes)
+        if 'cls' in task and 'surv' in task:
+            self.hazard_layer = nn.Linear(d_model, surv_classes)
+        self.task = task
     
-    def forward(self, x):
+    def encode(self, data):
+        # the shared forward process for both classification and survival tasks
+        # return the features (B, C) before the last linear layer
         # x: [B, N, D]
+        x = data['x']
         h = self._fc1(x)
         
         #---->pad
@@ -83,8 +89,45 @@ class TransMIL(nn.Module):
 
         #---->cls_token
         features = self.norm(h)[:,0] # [B, 512]
+
+        return features
+
+    def cls_forward(self, data):
+        features = self.encode(data)
         logits = self.classifier(features)
         y_hat = torch.argmax(logits, dim=1)
         y_prob = F.softmax(logits, dim=1)
-
         return ModelOutputs(features=features, logits=logits, y_hat=y_hat, y_prob=y_prob)
+
+    def surv_forward(self, data):
+        features = self.encode(data)
+        logits = self.classifier(features) # n_classes = surv_classes if task == surv
+        
+        y_hat = torch.argmax(logits, dim=1)
+        hazards = torch.sigmoid(logits)
+        surv = torch.cumprod(1 - hazards, dim=1)
+        return ModelOutputs(features=features, logits=logits, hazards=hazards, surv=surv, y_hat=y_hat)
+
+    def multitask_forward(self, data):
+        features = self.encode(data)
+        cls_logits = self.classifier(features)
+        y_hat = torch.argmax(cls_logits, dim=1)
+        y_prob = F.softmax(cls_logits, dim=1)
+
+        # survival task
+        surv_logits = self.hazard_layer(features)
+        surv_y_hat = torch.argmax(surv_logits, dim=1)
+        hazards = torch.sigmoid(surv_logits)
+        surv = torch.cumprod(1 - hazards, dim=1)
+        return ModelOutputs(features=features, cls_logits=cls_logits, y_hat=y_hat, y_prob=y_prob,
+                            surv_logits=surv_logits, surv_y_hat=surv_y_hat, hazards=hazards, surv=surv)
+
+    def forward(self, data):
+        if 'cls' in self.task and 'surv' in self.task:
+            return self.multitask_forward(data)
+        elif 'cls' in self.task:
+            return self.cls_forward(data)
+        elif 'surv' in self.task:
+            return self.surv_forward(data)
+        else:
+            raise NotImplementedError

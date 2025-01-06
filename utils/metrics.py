@@ -2,9 +2,10 @@ import numpy as np
 from sklearn.metrics import accuracy_score, f1_score, balanced_accuracy_score, \
     roc_auc_score, precision_score, matthews_corrcoef, cohen_kappa_score, average_precision_score
 from imblearn.metrics import sensitivity_score, specificity_score
+from sksurv.metrics import concordance_index_censored
 
 
-def compute_avg_metrics(ground_truth, activations, avg='micro', demical_places=4):
+def compute_cls_metrics(ground_truth, activations, avg='micro', demical_places=4):
 
     ground_truth = ground_truth.cpu().detach().numpy()
     activations = activations.cpu().detach().numpy()
@@ -45,3 +46,19 @@ def compute_avg_metrics(ground_truth, activations, avg='micro', demical_places=4
 
     metrics = {k: round(v, demical_places) for k, v in metrics.items()}
     return metrics
+
+
+def compute_surv_metrics(event_indicator, event_time, estimate, demical_places=4):
+    event_indicator = event_indicator.cpu().detach().numpy()
+    event_time = event_time.cpu().detach().numpy()
+    estimate = estimate.cpu().detach().numpy()
+
+    # event_indicator must be boolen
+    event_indicator = event_indicator.astype(bool)
+
+    cindex, *_ = concordance_index_censored(event_indicator, event_time, estimate, tied_tol=1e-08)
+    metrics = {'C-index': cindex}
+
+    metrics = {k: round(v, demical_places) for k, v in metrics.items()}
+    return metrics
+    
