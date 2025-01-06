@@ -43,13 +43,13 @@ class MetricLogger:
 
 
 class Trainer:
-    def __init__(self, wsi_df, args, wb_logger=None, val_steps=50, verbose=False):
+    def __init__(self, wsi_df, args, wb_logger=None, val_steps=50):
         self.wsi_df = wsi_df
         self.kfold = args.kfold
         self.args = args
         self.wb_logger = wb_logger
         self.val_steps = val_steps
-        self.verbose = verbose
+        self.verbose = args.verbose
         self.task = args.task
         self.m_logger = MetricLogger(n_folds=self.kfold)
         self.surv2lossfunc = {'nll': NLLSurvLoss, 'cox': CoxSurvLoss, 'ce': CrossEntropySurvLoss}

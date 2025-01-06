@@ -6,7 +6,7 @@ checkpoints: './checkpoints'
 results: './results'
 
 # dataset
-extractor: 'conch'
+extractor: 'Dense121'
 magnification: 20
 patch_size: 512
 patch_overlap: 0
@@ -18,7 +18,7 @@ task: 'survival' # ['2_cls', '4_cls', 'survival']
 surv_classes: 4
 
 # model
-backbone: 'TransMIL'
+backbone: 'ABMIL'
 d_model: 512
 activation: 'relu'
 surv_loss: 'CE' # ['CE', 'COX', 'NLL']
@@ -35,5 +35,6 @@ batch_size: 1 # as number of patches is different for each wsi
 lr: 5.0e-5 #[1.0e-5 for None; 1.0e-4 for cosine, 5.0e-6 OR 5.0e-5 is good]
 lr_policy: 'None' #['cosine','cosine_restarts', 'None', 'multi_step']
 weight_decay: 0.0005 #[5.0e-4,]
+verbose: False
 
 metric_avg: 'macro' # 'micro' or 'macro'
