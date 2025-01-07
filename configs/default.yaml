@@ -6,7 +6,7 @@ checkpoints: './checkpoints'
 results: './results'
 
 # dataset
-extractor: 'Dense121'
+extractor: 'Kimia'
 magnification: 20
 patch_size: 512
 patch_overlap: 0
@@ -18,7 +18,7 @@ task: 'survival' # ['2_cls', '4_cls', 'survival']
 surv_classes: 4
 
 # model
-backbone: 'ABMIL'
+backbone: 'MaxPool'
 d_model: 512
 activation: 'relu'
 surv_loss: 'CE' # ['CE', 'COX', 'NLL']
