@@ -24,6 +24,7 @@ class GraphTransformer(nn.Module): # TODO: Implement multi-task learning
 
         self.conv1 = GCNBlock(d_in, self.embed_dim)  # 64->128
         self.pool1 = nn.Linear(self.embed_dim, self.node_cluster_num)  # 100-> 20
+        self.task = task
 
     def cls_forward(self, data):
 

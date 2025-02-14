@@ -6,19 +6,19 @@ checkpoints: './checkpoints'
 results: './results'
 
 # dataset
-extractor: 'Kimia'
+extractor: 'conch' # ['conch', 'UNI', 'Kimia', 'Dense121']
 magnification: 20
 patch_size: 512
 patch_overlap: 0
 calibrate: True
 filter: True
-stain_norm: True
+stain_norm: False
 augmentation: True
 task: 'survival' # ['2_cls', '4_cls', 'survival']
 surv_classes: 4
 
 # model
-backbone: 'MaxPool'
+backbone: 'ABMIL' # ['TransMIL', 'MeanPool', 'MaxPool', 'ABMIL', 'GraphTransformer']
 d_model: 512
 activation: 'relu'
 surv_loss: 'CE' # ['CE', 'COX', 'NLL']

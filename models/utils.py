@@ -41,7 +41,7 @@ def CreateModel(args):
                        activation=args.activation, surv_classes=args.surv_classes, task=args.task)
     elif args.backbone.lower() == 'graphtransformer':
         from .GraphTransformer import GraphTransformer
-        model = GraphTransformer(args.d_in, args.n_classes)
+        model = GraphTransformer(args.d_in, args.n_classes, task=args.task)
     else:
         raise NotImplementedError
     return model

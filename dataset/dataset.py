@@ -9,37 +9,20 @@ from torch.utils.data import Dataset
 from albumentations.pytorch import ToTensorV2
 
 
-class Slide(object):
-    # for each wsi
-    def __init__(self, root_path, wsi_id, label, dim=512):
-        self.label = label
-        feature_path = os.path.join(root_path, wsi_id, 'features.pt')
-        adj_path = os.path.join(root_path, wsi_id, 'adj_s.pt')
-        if os.path.exists(feature_path):
-            self.feature = torch.load(feature_path, map_location=lambda storage, loc: storage)
-        else:
-            print(feature_path + ' not exists')
-            self.feature = torch.zeros(1, dim)
-        
-        if os.path.exists(adj_path):
-            self.adj = torch.load(adj_path, map_location=lambda storage, loc: storage)
-        else:
-            print(adj_path + ' not exists')
-            self.adj = torch.zeros(1, 1)
-
-
 class Slide:
     def __init__(self, root: str, row: pd.Series, d_x=512):
         # root: root path to the WSI samples
         # row: a row in the WSI information dataframe
         x_path = os.path.join(root, row['Slides.ID'], 'features.pt')
         adj_path = os.path.join(root, row['Slides.ID'], 'adj_s.pt')
-        self.label = row['Grade.Revised']
+        self.label = row['Cls.Label']
         self.surv_label = row['survival_interval']
         self.event_time = row['Overall.Survival.Months'] * 30
         self.c = 0 if row['Death (Yes or No)']=='Yes' else 1
         self.dead = 1 if row['Death (Yes or No)']=='Yes' else 0
         self.survival = row['Overall.Survival.Months']
+        self.grade = row['Tumor.Grade']
+        self.id = row['Slides.ID']
         
         if os.path.exists(x_path):
             self.x = torch.load(x_path, map_location=lambda storage, loc: storage)
@@ -61,7 +44,9 @@ class Slide:
             'event_time': self.event_time,
             'c': self.c,
             'dead': self.dead,
-            'survival': self.survival
+            'survival': self.survival,
+            'grade': self.grade,
+            'id': self.id
         }
         
         
@@ -85,7 +70,10 @@ class featureDataset(Dataset):
         if new_label:
             class2new = {'0': 0, '1': 1, '2': 2, '3': 2, 'D': 3}
             labels = [class2new[str(l)] for l in labels]
-            self.wsi_info['Grade.Revised'] = labels
+        grade2num = {'0': 0, '1': 1, '2': 2, '3': 3, 'D': 4}
+        grade_nums = [grade2num[str(l)] for l in labels]
+        self.wsi_info['Tumor.Grade'] = grade_nums
+        self.wsi_info['Cls.Label'] = labels
         # classification task or survival task
         self.num_labels = len(set(labels)) if not args.task == 'survival' else args.surv_classes
 

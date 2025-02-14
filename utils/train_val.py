@@ -76,8 +76,7 @@ class Trainer:
         elif self.args.lr_policy == 'cosine_restarts':
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=5)
         elif self.args.lr_policy == 'multi_step':
-            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[18, 19], gamma=0.1)
-    
+            self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[18, 19], gamma=0.1)  
 
     def kfold_train(self):
         kfold = StratifiedKFold(n_splits=self.kfold, shuffle=True, random_state=self.args.seed)
@@ -99,19 +98,22 @@ class Trainer:
             if self.verbose:
                 print('-'*20, f'Fold {fold} Metrics', '-'*20)
             print(metric_dict)
+
+            # do univariate cox regression analysis
+            if 'surv' in self.task:
+                self.fold_univariate_cox_regression_analysis(fold)
         
         avg_metrics = self.m_logger._fold_average()
         print('-'*20, 'Average Metrics', '-'*20)
         print(avg_metrics)
         self._save_fold_avg_results(avg_metrics)
 
-
     def train(self):
         self.model.train()
         cur_iters = 0
         for i in range(self.args.epochs):
             for data in self.train_loader:
-                data = {k: v.cuda(non_blocking=True) for k, v in data.items()}
+                data = {k: v.cuda(non_blocking=True) if hasattr(v, 'cuda') else v for k, v in data.items()}
         
                 outputs = self.model(data)
                 loss = self.criterion(outputs, data)
@@ -148,7 +150,7 @@ class Trainer:
 
         with torch.no_grad():
             for data in self.test_loader:
-                data = {k: v.cuda(non_blocking=True) for k, v in data.items()}
+                data = {k: v.cuda(non_blocking=True) if hasattr(v, 'cuda') else v for k, v in data.items()}
                 outputs = self.model(data)
 
                 if 'cls' in self.task:
@@ -225,3 +227,60 @@ class Trainer:
         df = df._append(new_row, ignore_index=True)
         df.to_excel(df_path, index=False)
         
+    def fold_univariate_cox_regression_analysis(self, fold):
+        training = self.model.training
+        self.model.eval()
+
+        event_indicator = torch.Tensor().cuda()
+        event_time = torch.Tensor().cuda()
+        risk_factor = torch.Tensor().cuda()
+        tumor_grade = torch.Tensor().cuda()
+        slide_id = []
+
+        df_name = f"{self.args.kfold}Fold_Cox.xlsx"
+        res_path = self.args.results
+        df_path = os.path.join(res_path, df_name)
+        if not os.path.exists(res_path):
+            os.makedirs(res_path)
+        
+                
+        with torch.no_grad():
+            for data in self.test_loader:
+                data = {k: v.cuda(non_blocking=True) if hasattr(v, 'cuda') else v for k, v in data.items()}
+                outputs = self.model(data)
+                risk = torch.sum(outputs['hazards'], dim=1)
+                event_indicator = torch.cat((event_indicator, data['dead']), dim=0)
+                event_time = torch.cat((event_time, data['event_time']), dim=0)
+                risk_factor = torch.cat((risk_factor, risk), dim=0)
+                tumor_grade = torch.cat((tumor_grade, data['grade']), dim=0)
+                slide_id.extend(data['id'])
+
+        fold_df = pd.DataFrame({
+            'Slide.ID': slide_id,
+            'Fold': [fold] * len(event_indicator),
+            'event': event_indicator.cpu().numpy(),
+            'duration': event_time.cpu().numpy(),
+            'T.Grade': tumor_grade.cpu().numpy(),
+            f'{self.args.backbone}': risk_factor.cpu().numpy(),
+        })
+
+        if hasattr(self, 'cox_df'):
+            self.cox_df = pd.concat([self.cox_df, fold_df], ignore_index=True)
+        else:
+            self.cox_df = fold_df
+
+        if fold == self.kfold - 1:
+            if os.path.exists(df_path):
+                existing_df = pd.read_excel(df_path)
+                existing_df[f'{self.args.backbone}'] = None  # Initialize the new column
+
+                for _, row in fold_df.iterrows():
+                    slide_id = row['Slide.ID']
+                    if slide_id in existing_df['Slide.ID'].values:
+                        existing_df.loc[existing_df['Slide.ID'] == slide_id, f'{self.args.backbone}'] = row[f'{self.args.backbone}']
+            else:
+                existing_df = fold_df
+            existing_df.to_excel(df_path, index=False)
+
+        self.model.train(training)       
+            
