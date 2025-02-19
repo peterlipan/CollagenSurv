@@ -1,7 +1,7 @@
 # Path
-wsi_csv_path: '/home/r20user18/Documents/datasets/labels/QMH_Chondroid_case_wsi_label_new.csv'
+wsi_csv_path: '/home/r20user18/Documents/datasets/labels/QMH_Chondroid_case_wsi_label_new_updated.csv'
 wsi_root: '/home/r20user18/Documents/datasets/WSI/Tiles'
-patient_csv_path: '/home/r20user18/Documents/datasets/labels/Chondroid_deeplearning_clinical_QMH_new.csv'
+patient_csv_path: '/home/r20user18/Documents/datasets/labels/Chondroid_deeplearning_clinical_QMH_new_updated.csv'
 checkpoints: './checkpoints'
 results: './results'
 
@@ -18,7 +18,7 @@ task: 'survival' # ['2_cls', '4_cls', 'survival']
 surv_classes: 4
 
 # model
-backbone: 'ABMIL' # ['TransMIL', 'MeanPool', 'MaxPool', 'ABMIL', 'GraphTransformer']
+backbone: 'TransMIL' # ['TransMIL', 'MeanPool', 'MaxPool', 'ABMIL', 'GraphTransformer']
 d_model: 512
 activation: 'relu'
 surv_loss: 'CE' # ['CE', 'COX', 'NLL']

@@ -43,8 +43,9 @@ class MetricLogger:
 
 
 class Trainer:
-    def __init__(self, wsi_df, args, wb_logger=None, val_steps=50):
+    def __init__(self, wsi_df, patient_df, args, wb_logger=None, val_steps=50):
         self.wsi_df = wsi_df
+        self.patient_df = patient_df
         self.kfold = args.kfold
         self.args = args
         self.wb_logger = wb_logger
@@ -80,8 +81,8 @@ class Trainer:
 
     def kfold_train(self):
         kfold = StratifiedKFold(n_splits=self.kfold, shuffle=True, random_state=self.args.seed)
-        patient_list = self.wsi_df['Case.ID'].values
-        patient_label_list = self.wsi_df['Grade.Revised'].values
+        patient_list = self.patient_df['Case.ID'].values
+        patient_label_list = self.patient_df['Grade.Revised'].values if 'cls' in self.task else self.patient_df['Death (Yes or No)'].values
         for fold, (train_idx, test_idx) in enumerate(kfold.split(patient_list, patient_label_list)):
             print('-'*20, f'Fold {fold}', '-'*20)
             train_pid = patient_list[train_idx]
@@ -257,7 +258,7 @@ class Trainer:
 
         fold_df = pd.DataFrame({
             'Slide.ID': slide_id,
-            'Fold': [fold] * len(event_indicator),
+            'Fold': [fold] * len(slide_id),
             'event': event_indicator.cpu().numpy(),
             'duration': event_time.cpu().numpy(),
             'T.Grade': tumor_grade.cpu().numpy(),
@@ -274,12 +275,12 @@ class Trainer:
                 existing_df = pd.read_excel(df_path)
                 existing_df[f'{self.args.backbone}'] = None  # Initialize the new column
 
-                for _, row in fold_df.iterrows():
+                for _, row in self.cox_df.iterrows():
                     slide_id = row['Slide.ID']
                     if slide_id in existing_df['Slide.ID'].values:
                         existing_df.loc[existing_df['Slide.ID'] == slide_id, f'{self.args.backbone}'] = row[f'{self.args.backbone}']
             else:
-                existing_df = fold_df
+                existing_df = self.cox_df
             existing_df.to_excel(df_path, index=False)
 
         self.model.train(training)       

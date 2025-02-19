@@ -38,9 +38,7 @@ def main(args, logger):
     else:
         raise ValueError("extractor should be one of ['UNI', 'Kimia', 'Dense121', 'conch']")
 
-    patient_list = patient_csv['Case.ID'].values
-    patient_label_list = patient_csv['Grade.Revised'].values
-    trainer = Trainer(wsi_df=wsi_csv, args=args, wb_logger=logger)
+    trainer = Trainer(wsi_df=wsi_csv, patient_df=patient_csv, args=args, wb_logger=logger)
     trainer.kfold_train()
 
 

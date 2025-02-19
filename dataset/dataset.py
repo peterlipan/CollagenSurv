@@ -67,11 +67,12 @@ class featureDataset(Dataset):
 
         # Update the grading
         labels = self.wsi_info['Grade.Revised'].values
+        grade2num = {'0': 0, '1': 1, '2': 2, '3': 3, 'D': 4}
+        grade_nums = [grade2num[str(l)] for l in labels]
         if new_label:
             class2new = {'0': 0, '1': 1, '2': 2, '3': 2, 'D': 3}
             labels = [class2new[str(l)] for l in labels]
-        grade2num = {'0': 0, '1': 1, '2': 2, '3': 3, 'D': 4}
-        grade_nums = [grade2num[str(l)] for l in labels]
+        
         self.wsi_info['Tumor.Grade'] = grade_nums
         self.wsi_info['Cls.Label'] = labels
         # classification task or survival task
