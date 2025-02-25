@@ -232,10 +232,9 @@ class Trainer:
         training = self.model.training
         self.model.eval()
 
-        event_indicator = torch.Tensor().cuda()
-        event_time = torch.Tensor().cuda()
-        risk_factor = torch.Tensor().cuda()
-        tumor_grade = torch.Tensor().cuda()
+        event_indicator = torch.empty(0).cuda()
+        event_time = torch.empty(0).cuda()
+        risk_factor = torch.empty(0).cuda()
         slide_id = []
 
         df_name = f"{self.args.kfold}Fold_Cox.xlsx"
@@ -253,16 +252,19 @@ class Trainer:
                 event_indicator = torch.cat((event_indicator, data['dead']), dim=0)
                 event_time = torch.cat((event_time, data['event_time']), dim=0)
                 risk_factor = torch.cat((risk_factor, risk), dim=0)
-                tumor_grade = torch.cat((tumor_grade, data['grade']), dim=0)
                 slide_id.extend(data['id'])
+        
+        event_indicator = event_indicator.cpu().numpy()
+        event_time = event_time.cpu().numpy()
+        risk_factor = risk_factor.cpu().numpy()
+                
 
         fold_df = pd.DataFrame({
             'Slide.ID': slide_id,
             'Fold': [fold] * len(slide_id),
-            'event': event_indicator.cpu().numpy(),
-            'duration': event_time.cpu().numpy(),
-            'T.Grade': tumor_grade.cpu().numpy(),
-            f'{self.args.backbone}': risk_factor.cpu().numpy(),
+            'event': event_indicator,
+            'duration': event_time,
+            f'{self.args.backbone}': risk_factor,
         })
 
         if hasattr(self, 'cox_df'):

@@ -46,7 +46,7 @@ class Slide:
             'dead': self.dead,
             'survival': self.survival,
             'grade': self.grade,
-            'id': self.id
+            'id': self.id,
         }
         
         
@@ -64,6 +64,7 @@ class featureDataset(Dataset):
             wsi_df = wsi_df[wsi_df['Slides.ID'] != 'CHS032-WSI02']
 
         self.wsi_info = wsi_df[wsi_df['Case.ID'].isin(patient_idx)]
+        self.wsi_info['T staging'] = self.wsi_info['T staging'].fillna('0')
 
         # Update the grading
         labels = self.wsi_info['Grade.Revised'].values

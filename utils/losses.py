@@ -69,10 +69,11 @@ class NLLSurvLoss(nn.Module):
 
 
 class CoxSurvLoss(nn.Module):
-    def forward(outputs, data, **kwargs):
+    def forward(self, outputs, data):
         # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
         # Cox-nnet: An artificial neural network method for prognosis prediction of high-throughput omics data
         hazards, S, c = outputs.hazards, outputs.surv, data['c']
+        device = hazards.device
         current_batch_len = len(S)
         R_mat = np.zeros([current_batch_len, current_batch_len], dtype=int)
         for i in range(current_batch_len):
