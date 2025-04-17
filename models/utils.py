@@ -42,6 +42,9 @@ def CreateModel(args):
     elif args.backbone.lower() == 'graphtransformer':
         from .GraphTransformer import GraphTransformer
         model = GraphTransformer(args.d_in, args.n_classes, task=args.task)
+    elif args.backbone.lower() == 'clam':
+        from .CLAM import CLAM_SB
+        model = CLAM_SB()
     else:
         raise NotImplementedError
     return model

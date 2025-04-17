@@ -108,6 +108,7 @@ class Trainer:
         print('-'*20, 'Average Metrics', '-'*20)
         print(avg_metrics)
         self._save_fold_avg_results(avg_metrics)
+        self.save_model()
 
     def train(self):
         self.model.train()
@@ -173,6 +174,13 @@ class Trainer:
         self.model.train(training)
 
         return metric_dict
+    
+    def save_model(self):
+        model_name = f"{self.args.backbone}_{self.args.extractor}.pt"
+        if not os.path.exists(self.args.checkpoints):
+            os.makedirs(self.args.checkpoints, exist_ok=True)
+        save_path = os.path.join(self.args.checkpoints, model_name)
+        torch.save(self.model.state_dict(), save_path)
 
     def _save_fold_avg_results(self, metric_dict, keep_best=True):
         # keep_best: whether save the best model (highest mcc) for each fold

@@ -12,13 +12,13 @@ patch_size: 512
 patch_overlap: 0
 calibrate: True
 filter: True
-stain_norm: True
-augmentation: True
+stain_norm: False
+augmentation: False
 task: 'survival' # ['2_cls', '4_cls', 'survival']
 surv_classes: 4
 
 # model
-backbone: 'MaxPool' # ['TransMIL', 'MeanPool', 'MaxPool', 'ABMIL', 'GraphTransformer']
+backbone: 'clam' # ['TransMIL', 'MeanPool', 'MaxPool', 'ABMIL', 'GraphTransformer']
 d_model: 512
 activation: 'relu'
 surv_loss: 'CE' # ['CE', 'COX', 'NLL']
