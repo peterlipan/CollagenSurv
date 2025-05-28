@@ -43,7 +43,7 @@ class DAttention(nn.Module):
             nn.Linear(self.L*self.K, n_classes),
         )
 
-        if 'cls' in task and 'surv' in task:
+        if 'cls' == task and 'surv' == task:
             self.hazard_layer = nn.Linear(self.L*self.K, surv_classes)
         self.task = task
 
@@ -94,11 +94,11 @@ class DAttention(nn.Module):
                             surv_logits=surv_logits, surv_y_hat=surv_y_hat, hazards=hazards, surv=surv)
 
     def forward(self, data):
-        if 'cls' in self.task and 'surv' in self.task:
+        if 'cls' == self.task and 'surv' == self.task:
             return self.multitask_forward(data)
-        elif 'cls' in self.task:
+        elif 'cls' == self.task:
             return self.cls_forward(data)
-        elif 'surv' in self.task:
+        elif 'surv' == self.task:
             return self.surv_forward(data)
         else:
             raise NotImplementedError
@@ -136,7 +136,7 @@ class GatedAttention(nn.Module):
         self.classifier = nn.Sequential(
             nn.Linear(self.L*self.K, n_classes),
         )
-        if 'cls' in task and 'surv' in task:
+        if 'cls' == task and 'surv' == task:
             self.hazard_layer = nn.Linear(self.L*self.K, surv_classes)
         self.task = task
     
@@ -188,11 +188,11 @@ class GatedAttention(nn.Module):
                             surv_logits=surv_logits, surv_y_hat=surv_y_hat, hazards=hazards, surv=surv)
     
     def forward(self, data):
-        if 'cls' in self.task and 'surv' in self.task:
+        if 'cls' == self.task and 'surv' == self.task:
             return self.multitask_forward(data)
-        elif 'cls' in self.task:
+        elif 'cls' == self.task:
             return self.cls_forward(data)
-        elif 'surv' in self.task:
+        elif 'surv' == self.task:
             return self.surv_forward(data)
         else:
             raise NotImplementedError
