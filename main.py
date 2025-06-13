@@ -1,45 +1,38 @@
 import os
+import random
 import torch
 import wandb
 import argparse
 import warnings
 import pandas as pd
 import numpy as np
-import torch.nn as nn
 from utils import yaml_config_hook, Trainer
 
+
+def all_paths_exist(row, root):
+    # Path with original extension for path1
+    path1 = os.path.join(root, row['Folder'], row['Filename'])
+    # Paths with .png extension for path2 and path3
+    filename_png = os.path.splitext(row['Filename'])[0] + '.png'
+    path2 = os.path.join(root, f"{row['Folder']}_HDM", filename_png)
+    path3 = os.path.join(root, f"{row['Folder']}_Masks", filename_png)
+    return os.path.exists(path1) and os.path.exists(path2) and os.path.exists(path3)
 
 def main(args, logger):
 
     torch.manual_seed(args.seed)
     np.random.seed(args.seed)
+    random.seed(args.seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
 
-    if args.task == '2_cls':
-        # binary classification
-        wsi_csv = pd.read_csv(args.wsi_csv_path)
-        patient_csv = pd.read_csv(args.patient_csv_path)   
-        wsi_csv = wsi_csv[wsi_csv['Grade.Revised'].isin(['0', '1'])]
-        patient_csv = patient_csv[patient_csv['Grade.Revised'].isin(['0', '1'])]
+    image_df = pd.read_excel(args.image_df_path)
 
-    elif args.task == '4_cls' or args.task == 'survival':
-        # 4 class classification
-        wsi_csv = pd.read_csv(args.wsi_csv_path)
-        patient_csv = pd.read_csv(args.patient_csv_path)  
+    # clean up the DataFrame if the image cannot be found
+    image_df = image_df[image_df.apply(lambda row: all_paths_exist(row, args.image_root), axis=1)]
 
-    else:
-        raise ValueError("task should be one of ['2_cls', '4_cls', 'survival']")
-
-    
-    # d_in is depend on the feature extractor
-    if args.extractor in ['UNI', 'Kimia', 'Dense121']:
-        args.d_in = 1024
-    elif args.extractor == 'conch':
-        args.d_in = 512
-    else:
-        raise ValueError("extractor should be one of ['UNI', 'Kimia', 'Dense121', 'conch']")
-
-    trainer = Trainer(wsi_df=wsi_csv, patient_df=patient_csv, args=args, wb_logger=logger)
-    trainer.kfold_train()
+    trainer = Trainer(image_df=image_df, args=args, wb_logger=logger)
+    trainer.kfold_train(args)
 
 
 if __name__ == '__main__':
@@ -53,19 +46,18 @@ if __name__ == '__main__':
 
     os.environ["CUDA_VISIBLE_DEVICES"] = args.visible_gpus
     if not args.debug:
-        wandb.login(key="5a217af8c48db3869e827b99d99fdf6a6330f04e")
+        wandb.login(key="cb1e7d54d21d9080b46d2b1ae2a13d895770aa29")
         config = dict()
 
         for k, v in yaml_config.items():
             config[k] = v
 
         wandb_logger = wandb.init(
-            project="QMH",
+            project="ColleganSurv",
             config=config
         )
     else:
         wandb_logger = None
-
 
     main(args, wandb_logger)
 

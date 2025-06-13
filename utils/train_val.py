@@ -3,7 +3,7 @@ import torch
 import warnings
 import pandas as pd
 from models import CreateModel
-from dataset import featureDataset
+from dataset import CollagenDataset, Transforms
 from .metrics import compute_cls_metrics, compute_surv_metrics
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedKFold
@@ -43,77 +43,87 @@ class MetricLogger:
 
 
 class Trainer:
-    def __init__(self, wsi_df, patient_df, args, wb_logger=None, val_steps=50):
-        self.wsi_df = wsi_df
-        self.patient_df = patient_df
-        self.kfold = args.kfold
-        self.args = args
+    def __init__(self, image_df, args, wb_logger=None, val_steps=50):
+        self.image_df = image_df
         self.wb_logger = wb_logger
         self.val_steps = val_steps
         self.verbose = args.verbose
-        self.task = args.task
-        self.m_logger = MetricLogger(n_folds=self.kfold)
+        self.m_logger = MetricLogger(n_folds=args.kfold)
         self.surv2lossfunc = {'nll': NLLSurvLoss, 'cox': CoxSurvLoss, 'ce': CrossEntropySurvLoss}
     
-    def _dataset_split(self, train_patient_idx, test_patient_idx):
-        self.train_dataset = featureDataset(args=self.args, wsi_df=self.wsi_df, patient_idx=train_patient_idx, new_label=self.args.calibrate)
-        self.test_dataset = featureDataset(args=self.args, wsi_df=self.wsi_df, patient_idx=test_patient_idx, new_label=self.args.calibrate)
-        self.train_loader = DataLoader(self.train_dataset, batch_size=self.args.batch_size, 
-                                       shuffle=True, num_workers=self.args.workers)
-        self.test_loader = DataLoader(self.test_dataset, batch_size=self.args.batch_size, 
-                                      shuffle=False, num_workers=self.args.workers)
+    def _dataset_split(self, args, train_df, test_df):
+        transforms = Transforms(size=args.size)
+        self.train_dataset = CollagenDataset(args=args, image_df=train_df, transform=transforms.train_transform)
+        self.test_dataset = CollagenDataset(args=args, image_df=test_df, transform=transforms.test_transform)
+
+        print(f"Train dataset size: {len(self.train_dataset)}, Test dataset size: {len(self.test_dataset)}")
+
+        self.train_loader = DataLoader(self.train_dataset, batch_size=args.batch_size, 
+                                       shuffle=True, num_workers=args.workers)
+        self.test_loader = DataLoader(self.test_dataset, batch_size=args.batch_size, 
+                                      shuffle=False, num_workers=args.workers)
         
-        self.args.n_classes = self.train_dataset.num_labels
-        self.model = CreateModel(self.args).cuda()
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=self.args.lr, weight_decay=self.args.weight_decay)
-        if 'cls' in self.args.task:
-            self.criterion = CrossEntropyClsLoss().cuda()
+        args.n_classes = self.train_dataset.n_classes
+        self.model = CreateModel(args).cuda()
+
+        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        if args.task == 'survival':
+            self.criterion = self.surv2lossfunc[args.surv_loss.lower()]().cuda()
         else:
-            self.criterion = self.surv2lossfunc[self.args.surv_loss.lower()]().cuda()
+            self.criterion = CrossEntropyClsLoss().cuda()
         
         self.scheduler = None
-        if self.args.lr_policy == 'cosine':
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=self.args.epochs)
-        elif self.args.lr_policy == 'cosine_restarts':
+        if args.lr_policy == 'cosine':
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=args.epochs)
+        elif args.lr_policy == 'cosine_restarts':
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=5)
-        elif self.args.lr_policy == 'multi_step':
+        elif args.lr_policy == 'multi_step':
             self.scheduler = torch.optim.lr_scheduler.MultiStepLR(self.optimizer, milestones=[18, 19], gamma=0.1)  
 
-    def kfold_train(self):
-        kfold = StratifiedKFold(n_splits=self.kfold, shuffle=True, random_state=self.args.seed)
-        patient_list = self.patient_df['Case.ID'].values
-        patient_label_list = self.patient_df['Grade.Revised'].values if 'cls' in self.task else self.patient_df['Death (Yes or No)'].values
+    def kfold_train(self, args):
+        kfold = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
+        if args.task == 'survival':
+            key  = 'Overall.Survival.Status'
+        else:
+            raise ValueError("Unsupported task: {}".format(args.task))
+        patient_df = self.image_df.dropna(subset=[key])
+        patient_df = patient_df.groupby('BBNumber').first().reset_index()[['BBNumber', key]]
+        patient_list = patient_df['BBNumber'].values
+        patient_label_list = patient_df[key].values
         for fold, (train_idx, test_idx) in enumerate(kfold.split(patient_list, patient_label_list)):
             print('-'*20, f'Fold {fold}', '-'*20)
             train_pid = patient_list[train_idx]
             test_pid = patient_list[test_idx]
-            self._dataset_split(train_pid, test_pid)
+            train_image_df = self.image_df[self.image_df['BBNumber'].isin(train_pid)]
+            test_image_df = self.image_df[self.image_df['BBNumber'].isin(test_pid)]
+
+            self._dataset_split(args, train_image_df, test_image_df)
 
             self.m_logger._set_fold(fold)
             self.fold = fold
 
-            self.train()
+            self.train(args)
             # validate for the fold
-            metric_dict = self.validate()
+            metric_dict = self.validate(args)
             self.m_logger.update(metric_dict)
             if self.verbose:
                 print('-'*20, f'Fold {fold} Metrics', '-'*20)
             print(metric_dict)
 
             # do univariate cox regression analysis
-            if 'surv' in self.task:
-                self.fold_univariate_cox_regression_analysis(fold)
+            if args.task == 'survival':
+                self.fold_univariate_cox_regression_analysis(args, fold)
         
         avg_metrics = self.m_logger._fold_average()
         print('-'*20, 'Average Metrics', '-'*20)
         print(avg_metrics)
-        self._save_fold_avg_results(avg_metrics)
-        self.save_model()
+        self._save_fold_avg_results(args, avg_metrics)
+        self.save_model(args)
 
-    def train(self):
+    def train(self, args):
         self.model.train()
         cur_iters = 0
-        for i in range(self.args.epochs):
+        for i in range(args.epochs):
             for data in self.train_loader:
                 data = {k: v.cuda(non_blocking=True) if hasattr(v, 'cuda') else v for k, v in data.items()}
         
@@ -130,74 +140,72 @@ class Trainer:
                 if self.verbose:
                     if cur_iters % self.val_steps == 0:
                         cur_lr = self.optimizer.param_groups[0]['lr']
-                        metric_dict = self.validate()
-                        print(f"Fold {self.fold} | Epoch {i} | Loss: {loss.item()} | Acc: {metric_dict['Accuracy']} | LR: {cur_lr}")
+                        metric_dict = self.validate(args)
+                        metric_print = f"Accuracy: {metric_dict['Accuracy']}" if not args.task == 'survival' else f"C-index: {metric_dict['C-index']}"
+                        print(f"Fold {self.fold} | Epoch {i} | Loss: {loss.item()} | {metric_print} | LR: {cur_lr}")
                         if self.wb_logger is not None:
                             self.wb_logger.log({f"Fold_{self.fold}": {
                                 'Train': {'loss': loss.item(), 'lr': cur_lr},
                                 'Test': metric_dict
                             }})
 
-    def validate(self):
+    def validate(self, args):
         training = self.model.training
         self.model.eval()
-
-        if 'cls' in self.task:
-            ground_truth = torch.Tensor().cuda()
-            probabilities = torch.Tensor().cuda()
-        if 'surv' in self.task:
+            
+        if args.task == 'survival':
             event_indicator = torch.Tensor().cuda() # whether the event (death) has occurred
             event_time = torch.Tensor().cuda()
             estimate = torch.Tensor().cuda()
+        else:
+            ground_truth = torch.Tensor().cuda()
+            probabilities = torch.Tensor().cuda()
 
         with torch.no_grad():
             for data in self.test_loader:
                 data = {k: v.cuda(non_blocking=True) if hasattr(v, 'cuda') else v for k, v in data.items()}
                 outputs = self.model(data)
-
-                if 'cls' in self.task:
-                    prob = outputs.y_prob
-                    ground_truth = torch.cat((ground_truth, data['label']), dim=0)
-                    probabilities = torch.cat((probabilities, prob), dim=0)
                 
-                if 'surv' in self.task:
+                if args.task == 'survival':
                     risk = -torch.sum(outputs['surv'], dim=1)
                     event_indicator = torch.cat((event_indicator, data['dead']), dim=0)
                     event_time = torch.cat((event_time, data['event_time']), dim=0)
                     estimate = torch.cat((estimate, risk), dim=0)
                     # compute survival metrics
+                else:
+                    prob = outputs.y_prob
+                    ground_truth = torch.cat((ground_truth, data['label']), dim=0)
+                    probabilities = torch.cat((probabilities, prob), dim=0)
             
-            cls_dict = compute_cls_metrics(ground_truth, probabilities) if 'cls' in self.task else {}
-            surv_dict = compute_surv_metrics(event_indicator, event_time, estimate) if 'surv' in self.task else {}
+            cls_dict = compute_cls_metrics(ground_truth, probabilities) if not args.task == 'survival' else {}
+            surv_dict = compute_surv_metrics(event_indicator, event_time, estimate) if args.task == 'survival' else {}
             metric_dict = {**cls_dict, **surv_dict}
         
         self.model.train(training)
 
         return metric_dict
     
-    def save_model(self):
-        model_name = f"{self.args.backbone}_{self.args.extractor}.pt"
-        if not os.path.exists(self.args.checkpoints):
-            os.makedirs(self.args.checkpoints, exist_ok=True)
-        save_path = os.path.join(self.args.checkpoints, model_name)
+    def save_model(self, args):
+        model_name = f"{args.task}_{args.backbone}.pt"
+        if not os.path.exists(args.checkpoints):
+            os.makedirs(args.checkpoints, exist_ok=True)
+        save_path = os.path.join(args.checkpoints, model_name)
         torch.save(self.model.state_dict(), save_path)
 
-    def _save_fold_avg_results(self, metric_dict, keep_best=True):
+    def _save_fold_avg_results(self, args, metric_dict, keep_best=True):
         # keep_best: whether save the best model (highest mcc) for each fold
-        task2name = {'2_cls': 'Binary', '4_cls': '4Class', 'survival': 'Survival'}
-        taskname = task2name[self.args.task]
+        task2name = {'survival': 'Survival'}
+        taskname = task2name[args.task]
 
-        df_name = f"{self.args.kfold}Fold_{taskname}.xlsx"
-        res_path = self.args.results
+        df_name = f"{args.kfold}Fold_{taskname}.xlsx"
+        res_path = args.results
         if not os.path.exists(res_path):
             os.makedirs(res_path)
 
-        dataset_settings = ['Model', 'KFold', 'Feature Extractor', 'Magnification', 'Patch Size', 
-                    'Patch Overlap', 'New Annotation', 'Stain Normalization', 'Augmentation', 'Epochs']
-        dataset_kwargs = ['backbone', 'kfold', 'extractor', 'magnification', 'patch_size', 
-                          'patch_overlap', 'calibrate', 'stain_norm', 'augmentation', 'epochs']
-        task_settings = ['Metric Average Method'] if 'cls'in self.task else ['Survival Loss']
-        task_kwargs = ['metric_avg'] if 'cls' in self.task else ['surv_loss']
+        dataset_settings = ['Model', 'KFold', 'Epochs']
+        dataset_kwargs = ['backbone', 'kfold', 'epochs']
+        task_settings = ['Metric Average Method'] if not args.task == 'survival' else ['Survival Loss']
+        task_kwargs = ['metric_avg'] if not args.task == 'survival' else ['surv_loss']
         
         settings = dataset_settings + task_settings
         set2kwargs = {k: v for k, v in zip(settings, dataset_kwargs + task_kwargs)}
@@ -214,16 +222,10 @@ class Trainer:
                 warnings.warn("Columns in the existing excel file do not match the current settings.")
                 df = pd.DataFrame(columns=df_columns)
         
-        new_row = {k: self.args.__dict__[v] for k, v in set2kwargs.items()}
-        # fine-grained modification for better presentation
-        new_row['Feature Extractor'] = new_row['Feature Extractor'].upper()
-        new_row['Magnification'] = f"{new_row['Magnification']}\u00D7"
-        new_row['New Annotation'] = 'Yes' if new_row['New Annotation'] else 'No'
-        new_row['Stain Normalization'] = 'Yes' if new_row['Stain Normalization'] else 'No'
-        new_row['Augmentation'] = 'Yes' if new_row['Augmentation'] else 'No'
+        new_row = {k: args.__dict__[v] for k, v in set2kwargs.items()}
 
         if keep_best: # keep the rows with the best mcc for each fold
-            reference = 'MCC' if 'cls' in self.task else 'C-index'
+            reference = 'MCC' if not args.task == 'survival' else 'C-index'
             exsiting_rows = df[(df[settings] == pd.Series(new_row)).all(axis=1)]
             if not exsiting_rows.empty:
                 exsiting_mcc = exsiting_rows[reference].values
@@ -236,17 +238,18 @@ class Trainer:
         df = df._append(new_row, ignore_index=True)
         df.to_excel(df_path, index=False)
         
-    def fold_univariate_cox_regression_analysis(self, fold):
+    def fold_univariate_cox_regression_analysis(self, args, fold):
         training = self.model.training
         self.model.eval()
 
         event_indicator = torch.empty(0).cuda()
         event_time = torch.empty(0).cuda()
         risk_factor = torch.empty(0).cuda()
-        slide_id = []
+        filename = []
+        patient_id = []
 
-        df_name = f"{self.args.kfold}Fold_Cox.xlsx"
-        res_path = self.args.results
+        df_name = f"{args.kfold}Fold_Cox.xlsx"
+        res_path = args.results
         df_path = os.path.join(res_path, df_name)
         if not os.path.exists(res_path):
             os.makedirs(res_path)
@@ -260,7 +263,8 @@ class Trainer:
                 event_indicator = torch.cat((event_indicator, data['dead']), dim=0)
                 event_time = torch.cat((event_time, data['event_time']), dim=0)
                 risk_factor = torch.cat((risk_factor, risk), dim=0)
-                slide_id.extend(data['id'])
+                filename.extend(data['filename'])
+                patient_id.extend(data['patient_id'])
         
         event_indicator = event_indicator.cpu().numpy()
         event_time = event_time.cpu().numpy()
@@ -268,11 +272,12 @@ class Trainer:
                 
 
         fold_df = pd.DataFrame({
-            'Slide.ID': slide_id,
-            'Fold': [fold] * len(slide_id),
+            'BBNumber': patient_id,
+            'Filename': filename,
+            'Fold': [fold] * len(filename),
             'event': event_indicator,
             'duration': event_time,
-            f'{self.args.backbone}': risk_factor,
+            f'{args.backbone}': risk_factor,
         })
 
         if hasattr(self, 'cox_df'):
@@ -280,15 +285,15 @@ class Trainer:
         else:
             self.cox_df = fold_df
 
-        if fold == self.kfold - 1:
+        if fold == args.kfold - 1:
             if os.path.exists(df_path):
                 existing_df = pd.read_excel(df_path)
-                existing_df[f'{self.args.backbone}'] = None  # Initialize the new column
+                existing_df[f'{args.backbone}'] = None  # Initialize the new column
 
                 for _, row in self.cox_df.iterrows():
-                    slide_id = row['Slide.ID']
-                    if slide_id in existing_df['Slide.ID'].values:
-                        existing_df.loc[existing_df['Slide.ID'] == slide_id, f'{self.args.backbone}'] = row[f'{self.args.backbone}']
+                    filename = row['Filename']
+                    if filename in existing_df['Slide.ID'].values:
+                        existing_df.loc[existing_df['Filename'] == filename, f'{args.backbone}'] = row[f'{args.backbone}']
             else:
                 existing_df = self.cox_df
             existing_df.to_excel(df_path, index=False)

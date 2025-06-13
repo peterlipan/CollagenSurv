@@ -42,7 +42,7 @@ class CrossEntropySurvLoss(nn.Module):
 
     def forward(self, outputs, data): 
 
-        return ce_loss(outputs.hazards, outputs.surv, data['surv_label'], data['c'], alpha=self.alpha)
+        return ce_loss(outputs.hazards, outputs.surv, data['label'], data['c'], alpha=self.alpha)
     
 
 class CrossEntropyClsLoss(nn.CrossEntropyLoss):
@@ -65,7 +65,7 @@ class NLLSurvLoss(nn.Module):
 
     def forward(self, outputs, data):
 
-        return nll_loss(outputs.hazards, outputs.surv, data['surv_label'], data['c'], alpha=self.alpha)
+        return nll_loss(outputs.hazards, outputs.surv, data['label'], data['c'], alpha=self.alpha)
 
 
 class CoxSurvLoss(nn.Module):

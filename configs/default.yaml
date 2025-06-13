@@ -1,40 +1,29 @@
 # Path
-wsi_csv_path: '/home/r20user18/Documents/datasets/labels/QMH_Chondroid_case_wsi_label_new.csv'
-wsi_root: '/home/r20user18/Documents/datasets/WSI/Tiles'
-patient_csv_path: '/home/r20user18/Documents/datasets/labels/Chondroid_deeplearning_clinical_QMH_new.csv'
+image_df_path: './Collagen_Images_Jun12.xlsx'
+image_root: '/datastorage/li/Collagen/Segmented'
 checkpoints: './checkpoints'
 results: './results'
 
 # dataset
-extractor: 'conch' # ['conch', 'UNI', 'Kimia', 'Dense121']
-magnification: 20
-patch_size: 512
-patch_overlap: 0
-calibrate: True
-filter: True
-stain_norm: False
-augmentation: False
 task: 'survival' # ['2_cls', '4_cls', 'survival']
 surv_classes: 4
 
 # model
-backbone: 'clam' # ['TransMIL', 'MeanPool', 'MaxPool', 'ABMIL', 'GraphTransformer']
-d_model: 512
-activation: 'relu'
+backbone: 'resnet18'
+pretrained: True
+size: 256
 surv_loss: 'CE' # ['CE', 'COX', 'NLL']
 
 
 # training
-workers: 16
-visible_gpus: '2'
-dropout: 0.3
-seed: 42 # 42 or 19
-kfold: 5 #3
-epochs: 25 # 25 or 30 50 #30+1/32+1/33+1 # C4-> 25 / 30,  C2-> 10
-batch_size: 1 # as number of patches is different for each wsi
-lr: 5.0e-5 #[1.0e-5 for None; 1.0e-4 for cosine, 5.0e-6 OR 5.0e-5 is good]
-lr_policy: 'None' #['cosine','cosine_restarts', 'None', 'multi_step']
-weight_decay: 0.0005 #[5.0e-4,]
-verbose: False
-
-metric_avg: 'macro' # 'micro' or 'macro'
+workers: 8
+visible_gpus: '0'
+seed: 42
+kfold: 5
+epochs: 500
+batch_size: 72
+lr: 2.0e-6
+lr_policy: 'None'
+weight_decay: 0.01
+verbose: True
+metric_avg: 'micro' # 'micro' or 'macro'
