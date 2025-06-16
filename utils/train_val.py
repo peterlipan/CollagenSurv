@@ -292,7 +292,7 @@ class Trainer:
 
                 for _, row in self.cox_df.iterrows():
                     filename = row['Filename']
-                    if filename in existing_df['Slide.ID'].values:
+                    if filename in existing_df['Filename'].values:
                         existing_df.loc[existing_df['Filename'] == filename, f'{args.backbone}'] = row[f'{args.backbone}']
             else:
                 existing_df = self.cox_df

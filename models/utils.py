@@ -28,8 +28,6 @@ class CreateModel(nn.Module):
     def __init__(self, args):
         backbone, pretrained, n_classes = args.backbone, args.pretrained, args.n_classes
         super(CreateModel, self).__init__()
-        models = ['resnet18', 'resnet50', 'efficientnet_v2_s']
-        assert backbone in models
         model = getattr(torchvision.models, backbone)(pretrained=pretrained)
         self.n_classes = n_classes
         
