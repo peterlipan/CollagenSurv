@@ -5,7 +5,7 @@ checkpoints: './checkpoints'
 results: './results'
 
 # dataset
-task: 'survival' # ['2_cls', '4_cls', 'survival']
+task: 'survival'
 surv_classes: 4
 
 # model
