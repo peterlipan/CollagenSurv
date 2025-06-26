@@ -1,4 +1,5 @@
 import os
+import wandb
 import torch
 import warnings
 import pandas as pd
@@ -43,7 +44,7 @@ class MetricLogger:
 
 
 class Trainer:
-    def __init__(self, image_df, args, wb_logger=None, val_steps=50):
+    def __init__(self, image_df, args, wb_logger=None, val_steps=200):
         self.image_df = image_df
         self.wb_logger = wb_logger
         self.val_steps = val_steps
@@ -52,7 +53,7 @@ class Trainer:
         self.surv2lossfunc = {'nll': NLLSurvLoss, 'cox': CoxSurvLoss, 'ce': CrossEntropySurvLoss}
     
     def _dataset_split(self, args, train_df, test_df):
-        transforms = Transforms(size=args.size)
+        transforms = Transforms(size=args.image_size)
         self.train_dataset = CollagenDataset(args=args, image_df=train_df, transform=transforms.train_transform)
         self.test_dataset = CollagenDataset(args=args, image_df=test_df, transform=transforms.test_transform)
 
@@ -67,6 +68,7 @@ class Trainer:
         self.model = CreateModel(args).cuda()
 
         self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+
         if args.task == 'survival':
             self.criterion = self.surv2lossfunc[args.surv_loss.lower()]().cuda()
         else:
@@ -82,11 +84,24 @@ class Trainer:
 
     def kfold_train(self, args):
         kfold = StratifiedKFold(n_splits=args.kfold, shuffle=True, random_state=args.seed)
-        if args.task == 'survival':
-            key  = 'Overall.Survival.Status'
-        else:
-            raise ValueError("Unsupported task: {}".format(args.task))
-        patient_df = self.image_df.dropna(subset=[key])
+
+        task2key = {
+            'survival': 'Overall.Survival.Status',
+            'grade': 'T.Grade',
+            'size': 'T.Size',
+            'vascular_invasion': 'T.VascularInvasion',
+            'lymph_invasion': 'T.LymphInvasion',
+            'node_status': 'Node.Status',
+            'er': 'T.ER_Status',
+            'pr': 'T.PR_Status',
+            'her2': 'T.HER2',
+        }
+
+        assert args.task in task2key, f"Unsupported task: {args.task}"
+        key = task2key[args.task]
+        patient_df = self.image_df.dropna(subset=[key], axis=0)
+        print(f"Total patients: {len(patient_df['BBNumber'].unique())}, Task: {args.task}")
+
         patient_df = patient_df.groupby('BBNumber').first().reset_index()[['BBNumber', key]]
         patient_list = patient_df['BBNumber'].values
         patient_label_list = patient_df[key].values
@@ -139,6 +154,9 @@ class Trainer:
                 cur_iters += 1
                 if self.verbose:
                     if cur_iters % self.val_steps == 0:
+                        # if cur_iters % (self.val_steps * 3) == 0:
+                        #     self.wb_logger.log({'Images': [wandb.Image(item) for item in data['image'].permute(0,2,3,1).detach().cpu().numpy()[:3]]})
+
                         cur_lr = self.optimizer.param_groups[0]['lr']
                         metric_dict = self.validate(args)
                         metric_print = f"Accuracy: {metric_dict['Accuracy']}" if not args.task == 'survival' else f"C-index: {metric_dict['C-index']}"
@@ -152,6 +170,8 @@ class Trainer:
     def validate(self, args):
         training = self.model.training
         self.model.eval()
+
+        loss = 0.0
             
         if args.task == 'survival':
             event_indicator = torch.Tensor().cuda() # whether the event (death) has occurred
@@ -165,6 +185,8 @@ class Trainer:
             for data in self.test_loader:
                 data = {k: v.cuda(non_blocking=True) if hasattr(v, 'cuda') else v for k, v in data.items()}
                 outputs = self.model(data)
+                batch_loss = self.criterion(outputs, data)
+                loss += batch_loss.item()
                 
                 if args.task == 'survival':
                     risk = -torch.sum(outputs['surv'], dim=1)
@@ -180,6 +202,7 @@ class Trainer:
             cls_dict = compute_cls_metrics(ground_truth, probabilities) if not args.task == 'survival' else {}
             surv_dict = compute_surv_metrics(event_indicator, event_time, estimate) if args.task == 'survival' else {}
             metric_dict = {**cls_dict, **surv_dict}
+            metric_dict['Loss'] = loss / len(self.test_loader)
         
         self.model.train(training)
 

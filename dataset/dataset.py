@@ -14,14 +14,31 @@ class CollagenDataset(Dataset):
 
         self.task = args.task
         self.root = args.image_root
-        if args.task == 'survival':
-            self.image_df = image_df.dropna(subset=['Overall.Survival.Months', 'Overall.Survival.Status'])
-            self.labels = self.image_df['Overall.Survival.Interval'].values
-            self.n_classes = len(np.unique(self.labels))
-            self.n_images = len(self.image_df)
-        else:
-            raise ValueError("Unsupported task: {}".format(args.task))
 
+        if self.task == 'survival':
+            image_df = image_df.dropna(subset=['Overall.Survival.Interval', 'Overall.Survival.Months', 'Overall.Survival.Status'])
+
+        task2key = {
+            'survival': 'Overall.Survival.Interval',
+            'grade': 'T.Grade',
+            'size': 'T.Size',
+            'vascular_invasion': 'T.VascularInvasion',
+            'lymph_invasion': 'T.LymphInvasion',
+            'node_status': 'Node.Status',
+            'er': 'T.ER_Status',
+            'pr': 'T.PR_Status',
+            'her2': 'T.HER2',
+        }
+        self.df = image_df.copy()
+        self.df['label'] = image_df[task2key[self.task]]
+        
+        # Map labels to start from 0
+        unique_labels = sorted(self.df['label'].unique())  # Get sorted unique labels
+        self.label_mapping = {label: idx for idx, label in enumerate(unique_labels)}  # Create mapping
+        self.df['label'] = self.df['label'].map(self.label_mapping)  # Apply mapping
+
+        self.n_classes = len(self.df['label'].unique())
+        self.n_images = len(self.df)
         self.transform = transform
             
     
@@ -29,53 +46,46 @@ class CollagenDataset(Dataset):
         return self.n_images
     
     def __getitem__(self, index):
-        row = self.image_df.iloc[index]
+        row = self.df.iloc[index]
         filename = row['Filename']
-        path1 = os.path.join(self.root, row['Folder'], filename)
-        filename_png = os.path.splitext(row['Filename'])[0] + '.png'
-        path2 = os.path.join(self.root, f"{row['Folder']}_HDM", filename_png)
-        path3 = os.path.join(self.root, f"{row['Folder']}_Masks", filename_png)
 
-        label = row['Overall.Survival.Interval']
-        event_time = row['Overall.Survival.Months'] * 30
-        c = 1 - row['Overall.Survival.Status']
-        dead = row['Overall.Survival.Status']
-        survival = row['Overall.Survival.Months']
-        patient_id = row['BBNumber']
+        path_r = os.path.join(self.root, f"{row['Folder']}_R", filename)
+        path_g = os.path.join(self.root, f"{row['Folder']}_G", filename)
+        path_b = os.path.join(self.root, f"{row['Folder']}_B", filename)
 
         # Load each grayscale image
-        image1 = Image.open(path1).convert('L')  # Convert to grayscale
-        image2 = Image.open(path2).convert('L')  # Convert to grayscale
-        image3 = Image.open(path3).convert('L')  # Convert to grayscale
+        image_r = Image.open(path_r).convert('L')  # Convert to grayscale
+        image_g = Image.open(path_g).convert('L')  # Convert to grayscale
+        image_b = Image.open(path_b).convert('L')  # Convert to grayscale
 
         # Convert images to numpy arrays
-        image1 = np.array(image1)
-        image2 = np.array(image2)
-        image3 = np.array(image3)
+        image_r = np.array(image_r)
+        image_g = np.array(image_g)
+        image_b = np.array(image_b)
 
         # Stack grayscale images to form a 3-channel image
-        image = np.stack([image1, image2, image3], axis=-1)  # Shape: (H, W, 3)
+        image = np.stack([image_r, image_g, image_b], axis=-1)  # Shape: (H, W, 3)
 
         # Apply transformations (if any)
         if self.transform:
             image = self.transform(image=image)['image']
         else:
             image = torch.from_numpy(image).permute(2, 0, 1)  # Convert HWC to CHW format
-
+        
         # Convert labels and other data to tensors
-        label = torch.tensor(label, dtype=torch.long)
-        event_time = torch.tensor(event_time, dtype=torch.float)
-        c = torch.tensor(c, dtype=torch.float)
-        dead = torch.tensor(dead, dtype=torch.float)
-        survival = torch.tensor(survival, dtype=torch.float)
+        label = torch.tensor(row['label'], dtype=torch.long)
 
-        return {
+        base_dict = {
             'image': image,
-            'label': label,
-            'event_time': event_time,
-            'c': c,
-            'dead': dead,
-            'survival': survival,
-            'patient_id': patient_id,
             'filename': filename,
+            'patient_id': row['BBNumber'],
+            'label': label,
         }
+
+        if self.task == 'survival':
+            base_dict['c'] = torch.tensor(1 - row['Overall.Survival.Status'], dtype=torch.float)
+            base_dict['survival'] = torch.tensor(row['Overall.Survival.Months'], dtype=torch.float)
+            base_dict['event_time'] = torch.tensor(30 * row['Overall.Survival.Months'], dtype=torch.float)
+            base_dict['dead'] = torch.tensor(row['Overall.Survival.Status'], dtype=torch.float)
+
+        return base_dict

@@ -9,15 +9,6 @@ import numpy as np
 from utils import yaml_config_hook, Trainer
 
 
-def all_paths_exist(row, root):
-    # Path with original extension for path1
-    path1 = os.path.join(root, row['Folder'], row['Filename'])
-    # Paths with .png extension for path2 and path3
-    filename_png = os.path.splitext(row['Filename'])[0] + '.png'
-    path2 = os.path.join(root, f"{row['Folder']}_HDM", filename_png)
-    path3 = os.path.join(root, f"{row['Folder']}_Masks", filename_png)
-    return os.path.exists(path1) and os.path.exists(path2) and os.path.exists(path3)
-
 def main(args, logger):
 
     torch.manual_seed(args.seed)
@@ -27,9 +18,6 @@ def main(args, logger):
     torch.backends.cudnn.benchmark = False
 
     image_df = pd.read_excel(args.image_df_path)
-
-    # clean up the DataFrame if the image cannot be found
-    image_df = image_df[image_df.apply(lambda row: all_paths_exist(row, args.image_root), axis=1)]
 
     trainer = Trainer(image_df=image_df, args=args, wb_logger=logger)
     trainer.kfold_train(args)
