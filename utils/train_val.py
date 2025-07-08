@@ -44,7 +44,7 @@ class MetricLogger:
 
 
 class Trainer:
-    def __init__(self, image_df, args, wb_logger=None, val_steps=200):
+    def __init__(self, image_df, args, wb_logger=None, val_steps=20):
         self.image_df = image_df
         self.wb_logger = wb_logger
         self.val_steps = val_steps
@@ -54,8 +54,8 @@ class Trainer:
     
     def _dataset_split(self, args, train_df, test_df):
         transforms = Transforms(size=args.image_size)
-        self.train_dataset = CollagenDataset(args=args, image_df=train_df, transform=transforms.train_transform)
-        self.test_dataset = CollagenDataset(args=args, image_df=test_df, transform=transforms.test_transform)
+        self.train_dataset = CollagenDataset(args=args, image_df=train_df, transform=transforms.train_transform, include=args.include)
+        self.test_dataset = CollagenDataset(args=args, image_df=test_df, transform=transforms.test_transform, include=args.include)
 
         print(f"Train dataset size: {len(self.train_dataset)}, Test dataset size: {len(self.test_dataset)}")
 
@@ -67,7 +67,7 @@ class Trainer:
         args.n_classes = self.train_dataset.n_classes
         self.model = CreateModel(args).cuda()
 
-        self.optimizer = torch.optim.Adam(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
+        self.optimizer = getattr(torch.optim, args.optimizer)(self.model.parameters(), lr=args.lr, weight_decay=args.weight_decay)
 
         if args.task == 'survival':
             self.criterion = self.surv2lossfunc[args.surv_loss.lower()]().cuda()
@@ -76,7 +76,7 @@ class Trainer:
         
         self.scheduler = None
         if args.lr_policy == 'cosine':
-            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=args.epochs)
+            self.scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=args.epochs * len(self.train_loader), eta_min=1e-6)
         elif args.lr_policy == 'cosine_restarts':
             self.scheduler = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(self.optimizer, T_0=5)
         elif args.lr_policy == 'multi_step':
@@ -144,9 +144,14 @@ class Trainer:
         
                 outputs = self.model(data)
                 loss = self.criterion(outputs, data)
+                print(f"Fold {self.fold} | Epoch {i} | Iter {cur_iters} | Loss: {loss.item()}")
 
                 self.optimizer.zero_grad()
                 loss.backward()
+
+                # clip gradients to avoid exploding gradients
+                torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=1.0, norm_type=2)
+
                 self.optimizer.step()
                 if self.scheduler is not None:
                     self.scheduler.step()
@@ -175,7 +180,7 @@ class Trainer:
             
         if args.task == 'survival':
             event_indicator = torch.Tensor().cuda() # whether the event (death) has occurred
-            event_time = torch.Tensor().cuda()
+            duration = torch.Tensor().cuda()
             estimate = torch.Tensor().cuda()
         else:
             ground_truth = torch.Tensor().cuda()
@@ -189,9 +194,9 @@ class Trainer:
                 loss += batch_loss.item()
                 
                 if args.task == 'survival':
-                    risk = -torch.sum(outputs['surv'], dim=1)
-                    event_indicator = torch.cat((event_indicator, data['dead']), dim=0)
-                    event_time = torch.cat((event_time, data['event_time']), dim=0)
+                    risk = -1 * outputs.risk # lifelines expect higher value = longer survival
+                    event_indicator = torch.cat((event_indicator, data['event']), dim=0)
+                    duration = torch.cat((duration, data['duration']), dim=0)
                     estimate = torch.cat((estimate, risk), dim=0)
                     # compute survival metrics
                 else:
@@ -200,7 +205,7 @@ class Trainer:
                     probabilities = torch.cat((probabilities, prob), dim=0)
             
             cls_dict = compute_cls_metrics(ground_truth, probabilities) if not args.task == 'survival' else {}
-            surv_dict = compute_surv_metrics(event_indicator, event_time, estimate) if args.task == 'survival' else {}
+            surv_dict = compute_surv_metrics(event_indicator, duration, estimate) if args.task == 'survival' else {}
             metric_dict = {**cls_dict, **surv_dict}
             metric_dict['Loss'] = loss / len(self.test_loader)
         
@@ -266,7 +271,7 @@ class Trainer:
         self.model.eval()
 
         event_indicator = torch.empty(0).cuda()
-        event_time = torch.empty(0).cuda()
+        duration = torch.empty(0).cuda()
         risk_factor = torch.empty(0).cuda()
         filename = []
         patient_id = []
@@ -282,15 +287,15 @@ class Trainer:
             for data in self.test_loader:
                 data = {k: v.cuda(non_blocking=True) if hasattr(v, 'cuda') else v for k, v in data.items()}
                 outputs = self.model(data)
-                risk = torch.sum(outputs['hazards'], dim=1)
-                event_indicator = torch.cat((event_indicator, data['dead']), dim=0)
-                event_time = torch.cat((event_time, data['event_time']), dim=0)
+                risk = outputs.risk
+                event_indicator = torch.cat((event_indicator, data['event']), dim=0)
+                duration = torch.cat((duration, data['duration']), dim=0)
                 risk_factor = torch.cat((risk_factor, risk), dim=0)
                 filename.extend(data['filename'])
                 patient_id.extend(data['patient_id'])
         
         event_indicator = event_indicator.cpu().numpy()
-        event_time = event_time.cpu().numpy()
+        duration = duration.cpu().numpy()
         risk_factor = risk_factor.cpu().numpy()
                 
 
@@ -299,7 +304,7 @@ class Trainer:
             'Filename': filename,
             'Fold': [fold] * len(filename),
             'event': event_indicator,
-            'duration': event_time,
+            'duration': duration,
             f'{args.backbone}': risk_factor,
         })
 

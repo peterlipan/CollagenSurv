@@ -2,6 +2,7 @@ import torch
 import numpy as np
 import torch.nn as nn
 import torch.nn.functional as F
+from pycox.models.loss import CoxPHLoss
 
 
 def nll_loss(hazards, S, Y, c, alpha=0.4, eps=1e-7):
@@ -23,7 +24,7 @@ def nll_loss(hazards, S, Y, c, alpha=0.4, eps=1e-7):
 def ce_loss(hazards, S, Y, c, alpha=0.4, eps=1e-7):
     batch_size = len(Y)
     Y = Y.view(batch_size, 1) # ground truth bin, 1,2,...,k
-    c = c.view(batch_size, 1).float() #censorship status, 0 or 1
+    c = c.view(batch_size, 1).float() #censorship status, 0 or 1, 1 means censored, 0 means uncensored
     if S is None:
         S = torch.cumprod(1 - hazards, dim=1) # surival is cumulative product of 1 - hazards
 
@@ -41,7 +42,6 @@ class CrossEntropySurvLoss(nn.Module):
         self.alpha = alpha
 
     def forward(self, outputs, data): 
-
         return ce_loss(outputs.hazards, outputs.surv, data['label'], data['c'], alpha=self.alpha)
     
 
@@ -69,19 +69,10 @@ class NLLSurvLoss(nn.Module):
 
 
 class CoxSurvLoss(nn.Module):
+    def __init__(self, eps=1e-6):
+        super().__init__()
+        self.cph = CoxPHLoss()
+        self.eps = eps
     def forward(self, outputs, data):
-        # This calculation credit to Travers Ching https://github.com/traversc/cox-nnet
-        # Cox-nnet: An artificial neural network method for prognosis prediction of high-throughput omics data
-        hazards, S, c = outputs.hazards, outputs.surv, data['c']
-        device = hazards.device
-        current_batch_len = len(S)
-        R_mat = np.zeros([current_batch_len, current_batch_len], dtype=int)
-        for i in range(current_batch_len):
-            for j in range(current_batch_len):
-                R_mat[i,j] = S[j] >= S[i]
-
-        R_mat = torch.FloatTensor(R_mat).to(device)
-        theta = hazards.reshape(-1)
-        exp_theta = torch.exp(theta)
-        loss_cox = -torch.mean((theta - torch.log(torch.sum(exp_theta*R_mat, dim=1))) * (1-c))
-        return loss_cox
+        # directly predict the risk factors
+        return self.cph(outputs.risk.add(self.eps).log(), data['duration'], data['event'])

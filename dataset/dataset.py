@@ -10,13 +10,22 @@ from albumentations.pytorch import ToTensorV2
        
 
 class CollagenDataset(Dataset):
-    def __init__(self, args, image_df, transform=None):
+    def __init__(self, args, image_df, transform=None, include='stroma'):
 
         self.task = args.task
         self.root = args.image_root
 
         if self.task == 'survival':
             image_df = image_df.dropna(subset=['Overall.Survival.Interval', 'Overall.Survival.Months', 'Overall.Survival.Status'])
+        
+        if include == 'stroma':
+            image_df = image_df[image_df['Tumour_Stroma'] == 'Stroma']
+        elif include == 'tumour':
+            image_df = image_df[image_df['Tumour_Stroma'] == 'Tumour']
+        elif include == 'both':
+            pass
+        else:
+            raise ValueError("include must be one of 'stroma', 'tumour', or 'both'.")
 
         task2key = {
             'survival': 'Overall.Survival.Interval',
@@ -38,6 +47,8 @@ class CollagenDataset(Dataset):
         self.df['label'] = self.df['label'].map(self.label_mapping)  # Apply mapping
 
         self.n_classes = len(self.df['label'].unique())
+        if args.surv_loss.lower() == 'cox':
+            self.n_classes = 1 # Cox regression predicts a single risk factor
         self.n_images = len(self.df)
         self.transform = transform
             
@@ -85,7 +96,7 @@ class CollagenDataset(Dataset):
         if self.task == 'survival':
             base_dict['c'] = torch.tensor(1 - row['Overall.Survival.Status'], dtype=torch.float)
             base_dict['survival'] = torch.tensor(row['Overall.Survival.Months'], dtype=torch.float)
-            base_dict['event_time'] = torch.tensor(30 * row['Overall.Survival.Months'], dtype=torch.float)
-            base_dict['dead'] = torch.tensor(row['Overall.Survival.Status'], dtype=torch.float)
+            base_dict['duration'] = torch.tensor(30 * row['Overall.Survival.Months'], dtype=torch.float)
+            base_dict['event'] = torch.tensor(row['Overall.Survival.Status'], dtype=torch.float)
 
         return base_dict
