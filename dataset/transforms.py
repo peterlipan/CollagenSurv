@@ -74,8 +74,8 @@ class GradientMapTransform(ImageOnlyTransform):
 class Transforms:
     def __init__(self, size):
         # Mean and std should be recomputed over gradient-based training set ideally
-        mean = (0.21068942, 0.15048029, 0.104741)
-        std = (0.26927587, 0.17788138, 0.08125762)
+        mean = (0.5, 0.5, 0.5)
+        std = (0.5, 0.5, 0.5)
 
         self.train_transform = A.Compose([
             # Convert to gradient image first

@@ -1,5 +1,5 @@
 # Path
-image_df_path: './Collagen_Images_Jun25.xlsx'
+image_df_path: './Collagen_Images_Jul8.xlsx'
 image_root: '/datastorage/li/CollagenRawImages'
 checkpoints: './checkpoints'
 results: './results'
@@ -14,17 +14,17 @@ backbone: 'CustomCNN'
 pretrained: 'WinKawaks/vit-tiny-patch16-224'
 patch_size: 16
 image_size: 1200
-surv_loss: 'cox' # ['CE', 'COX', 'NLL']
+surv_loss: 'hit' # ['CE', 'COX', 'NLL', 'HIT']
 freeze: False
 
 
 # training
 workers: 0
 visible_gpus: '1'
-optimizer: 'Adam'
+optimizer: 'AdamW'
 seed: 42
 kfold: 5
-epochs: 500
+epochs: 50
 batch_size: 48
 lr: 2.0e-4
 lr_policy: 'cosine'

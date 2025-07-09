@@ -35,33 +35,33 @@ class Transformer(nn.Module):
 
 
 class CustomCNNBackbone(nn.Module):
-    def __init__(self, out_dim=512, dropout_prob=0.2):
+    def __init__(self, out_dim=512, dropout_prob=0.1):
         super(CustomCNNBackbone, self).__init__()
         self.features = nn.Sequential(
             nn.Conv2d(3, 32, kernel_size=7, stride=2, padding=3),
-            nn.BatchNorm2d(32, eps=1e-5),
-            nn.SiLU(),
+            nn.BatchNorm2d(32, eps=1e-4),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(p=dropout_prob),
             nn.MaxPool2d(2),
 
             nn.Conv2d(32, 64, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(64, eps=1e-5),
-            nn.SiLU(),
+            nn.BatchNorm2d(64, eps=1e-4),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(p=dropout_prob),
 
             nn.Conv2d(64, 128, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(128, eps=1e-5),
-            nn.SiLU(),
+            nn.BatchNorm2d(128, eps=1e-4),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(p=dropout_prob),
 
             nn.Conv2d(128, 256, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(256, eps=1e-5),
-            nn.SiLU(),
+            nn.BatchNorm2d(256, eps=1e-4),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(p=dropout_prob),
 
             nn.Conv2d(256, 512, kernel_size=3, stride=2, padding=1),
-            nn.BatchNorm2d(512, eps=1e-5),
-            nn.SiLU(),
+            nn.BatchNorm2d(512, eps=1e-4),
+            nn.ReLU(inplace=True),
             nn.Dropout2d(p=dropout_prob),
 
             nn.AdaptiveAvgPool2d((1, 1))
@@ -77,7 +77,7 @@ class CustomCNNBackbone(nn.Module):
 
     def weights_init(self, m):
         if isinstance(m, nn.Conv2d):
-            nn.init.kaiming_normal_(m.weight, nonlinearity='relu')  # SiLU is close to ReLU
+            nn.init.kaiming_uniform_(m.weight, nonlinearity='relu')  # SiLU is close to ReLU
             if m.bias is not None:
                 nn.init.constant_(m.bias, 0)
         elif isinstance(m, nn.Linear):

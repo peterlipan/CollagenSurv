@@ -8,7 +8,7 @@ from dataset import CollagenDataset, Transforms
 from .metrics import compute_cls_metrics, compute_surv_metrics
 from torch.utils.data import DataLoader
 from sklearn.model_selection import StratifiedKFold
-from .losses import CrossEntropySurvLoss, NLLSurvLoss, CoxSurvLoss, CrossEntropyClsLoss
+from .losses import CrossEntropySurvLoss, NLLSurvLoss, CoxSurvLoss, CrossEntropyClsLoss, DeepHitsurvLoss
 
 
 class MetricLogger:
@@ -50,7 +50,7 @@ class Trainer:
         self.val_steps = val_steps
         self.verbose = args.verbose
         self.m_logger = MetricLogger(n_folds=args.kfold)
-        self.surv2lossfunc = {'nll': NLLSurvLoss, 'cox': CoxSurvLoss, 'ce': CrossEntropySurvLoss}
+        self.surv2lossfunc = {'nll': NLLSurvLoss, 'cox': CoxSurvLoss, 'ce': CrossEntropySurvLoss, 'hit': DeepHitsurvLoss}
     
     def _dataset_split(self, args, train_df, test_df):
         transforms = Transforms(size=args.image_size)
